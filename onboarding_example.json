@@ -1,0 +1,12 @@
+{
+  "employee_name": "Jane Smith",
+  "role": "Backend Engineer",
+  "department": "Engineering",
+  "start_date": "2026-01-15",
+  "manager_name": "John Doe",
+  "buddy_name": "Mike Johnson",
+  "equipment": ["MacBook Pro 16", "Monitor 27 inch", "Keyboard", "Mouse", "Headset"],
+  "systems_access": ["GitHub", "Jira", "Slack", "AWS Console", "VPN", "Confluence"],
+  "training_required": ["Security Awareness", "Code Standards", "CI/CD Pipeline", "On-call Procedures"],
+  "team_members": ["Sarah K.", "Mike L.", "Carlos R.", "Amy T."]
+}
