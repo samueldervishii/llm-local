@@ -65,13 +65,17 @@ Output: `output/onboarding_jane_smith_20260107.md`
 
 ## API Reference
 
+Base URL: `http://localhost:8000/api/v1`
+
 Start the API server:
 
 ```bash
+python api/server.py
+# or
 uvicorn api.server:app --reload --port 8000
 ```
 
-API documentation available at `http://localhost:8000/docs`
+API documentation available at `http://localhost:8000/api/v1/docs`
 
 ---
 
@@ -85,7 +89,9 @@ Response:
 ```json
 {
   "status": "healthy",
-  "service": "performance-review-api"
+  "service": "hr-document-generator",
+  "version": "1.0.0",
+  "api": "/api/v1"
 }
 ```
 
@@ -94,7 +100,7 @@ Response:
 ### Create Employee
 
 ```
-POST /employees/
+POST /api/v1/employees/
 Content-Type: application/json
 ```
 
@@ -160,7 +166,7 @@ Response `201 Created`:
 ### List All Employees
 
 ```
-GET /employees/
+GET /api/v1/employees/
 ```
 
 Response `200 OK`:
@@ -180,10 +186,10 @@ Response `200 OK`:
 ### Get Employee
 
 ```
-GET /employees/{name}
+GET /api/v1/employees/{name}
 ```
 
-Example: `GET /employees/John%20Doe`
+Example: `GET /api/v1/employees/John%20Doe`
 
 Response `200 OK`:
 ```json
@@ -211,7 +217,7 @@ Response `404 Not Found`:
 ### Update Employee
 
 ```
-PUT /employees/{name}
+PUT /api/v1/employees/{name}
 Content-Type: application/json
 ```
 
@@ -235,7 +241,7 @@ Response `200 OK`:
 ### Delete Employee
 
 ```
-DELETE /employees/{name}
+DELETE /api/v1/employees/{name}
 ```
 
 Response `200 OK`:

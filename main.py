@@ -9,6 +9,25 @@ from database import MongoDatabase
 from llm import LocalLLM
 from generator import ReviewGenerator, OnboardingGenerator
 
+VERSION = "1.0.0"
+
+BANNER = f"""
+ _   _ ____     ____
+| | | |  _ \   / ___| ___ _ __
+| |_| | |_) | | |  _ / _ \ '_ \
+|  _  |  _ <  | |_| |  __/ | | |
+|_| |_|_| \_\  \____|\___|_| |_|
+
+HR Document Generator v{VERSION}
+Powered by Llama 3.2
+─────────────────────────────────
+"""
+
+
+def show_banner():
+    """Display the application banner."""
+    print(BANNER)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -46,45 +65,62 @@ Examples:
         metavar="JSON_FILE",
         help="Generate onboarding plan from JSON file",
     )
+    group.add_argument(
+        "--version", "-v",
+        action="store_true",
+        help="Show version info",
+    )
 
     args = parser.parse_args()
+
+    # Show version and exit
+    if args.version:
+        show_banner()
+        return 0
 
     try:
         # Handle --onboarding (no DB needed)
         if args.onboarding:
+            show_banner()
             with open(args.onboarding, "r") as f:
                 onboarding_data = json.load(f)
 
-            print("Loading LLM model...")
+            print("[*] Loading LLM model...")
             with LocalLLM() as llm:
-                print("Model loaded successfully.\n")
+                print("[+] Model loaded successfully.\n")
                 generator = OnboardingGenerator(llm)
                 generator.generate(onboarding_data)
+            print("\n[+] Done!")
             return 0
 
         # Database operations
         with MongoDatabase() as db:
             if args.list:
-                print("Employees in database:")
+                show_banner()
+                print("[*] Employees in database:")
                 print("-" * 40)
                 names = db.list_employee_names()
                 if names:
                     for name in names:
-                        print(f"  - {name}")
-                    print(f"\nTotal: {len(names)} employees")
+                        print(f"    {name}")
+                    print("-" * 40)
+                    print(f"    Total: {len(names)} employees")
                 else:
-                    print("  No employees found.")
+                    print("    No employees found.")
                 return 0
 
-            print("Loading LLM model...")
+            show_banner()
+            print("[*] Loading LLM model...")
             with LocalLLM() as llm:
-                print("Model loaded successfully.\n")
+                print("[+] Model loaded successfully.\n")
                 generator = ReviewGenerator(llm, db)
 
                 if args.employee:
                     generator.generate_single(args.employee)
                 elif args.all:
                     generator.generate_all()
+
+            print("\n[+] Done!")
 
         return 0
 
