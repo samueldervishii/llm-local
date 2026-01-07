@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, status
 
 from database import MongoDatabase
+from logging_config import get_logger
 from .models import (
     EmployeeCreate,
     EmployeeUpdate,
@@ -12,6 +13,8 @@ from .models import (
     ProjectDetail,
     PreviousGoal,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -68,7 +71,10 @@ def _format_employee_response(employee: dict) -> EmployeeResponse:
 )
 def create_employee(employee: EmployeeCreate):
     """Create a new employee record."""
+    logger.info(f"Creating employee: {employee.name}")
+
     if db.employee_exists(employee.name):
+        logger.warning(f"Employee already exists: {employee.name}")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Employee '{employee.name}' already exists",
@@ -78,6 +84,7 @@ def create_employee(employee: EmployeeCreate):
     employee_data = employee.model_dump()
 
     inserted_id = db.insert_employee(employee_data)
+    logger.info(f"Employee created successfully: {employee.name} (ID: {inserted_id})")
 
     return MessageResponse(
         message=f"Employee '{employee.name}' created successfully",
@@ -93,7 +100,9 @@ def create_employee(employee: EmployeeCreate):
 )
 def list_employees():
     """Get all employees."""
+    logger.debug("Fetching all employees")
     employees = db.get_all_employees()
+    logger.info(f"Retrieved {len(employees)} employees")
     return [_format_employee_response(emp) for emp in employees]
 
 
@@ -105,12 +114,15 @@ def list_employees():
 )
 def get_employee(name: str):
     """Get a single employee by name."""
+    logger.debug(f"Fetching employee: {name}")
     employee = db.get_employee(name)
     if not employee:
+        logger.warning(f"Employee not found: {name}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Employee '{name}' not found",
         )
+    logger.info(f"Retrieved employee: {name}")
     return _format_employee_response(employee)
 
 
@@ -122,7 +134,10 @@ def get_employee(name: str):
 )
 def update_employee(name: str, employee: EmployeeUpdate):
     """Update an existing employee."""
+    logger.info(f"Updating employee: {name}")
+
     if not db.employee_exists(name):
+        logger.warning(f"Employee not found for update: {name}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Employee '{name}' not found",
@@ -133,12 +148,14 @@ def update_employee(name: str, employee: EmployeeUpdate):
         update_data["metrics"] = employee.metrics.model_dump()
 
     if not update_data:
+        logger.warning(f"No fields to update for: {name}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
 
     db.update_employee(name, update_data)
+    logger.info(f"Employee updated successfully: {name}")
 
     return MessageResponse(message=f"Employee '{name}' updated successfully")
 
@@ -151,10 +168,14 @@ def update_employee(name: str, employee: EmployeeUpdate):
 )
 def delete_employee(name: str):
     """Delete an employee."""
+    logger.info(f"Deleting employee: {name}")
+
     if not db.delete_employee(name):
+        logger.warning(f"Employee not found for deletion: {name}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Employee '{name}' not found",
         )
 
+    logger.info(f"Employee deleted successfully: {name}")
     return MessageResponse(message=f"Employee '{name}' deleted successfully")

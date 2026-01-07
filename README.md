@@ -253,6 +253,65 @@ Response `200 OK`:
 
 ---
 
+## Generation Endpoints
+
+The API includes LLM-powered generation endpoints. The model is loaded on server startup.
+
+### Generate Performance Review
+
+```
+POST /api/v1/generate/review/{employee_name}
+```
+
+Example: `POST /api/v1/generate/review/John%20Doe`
+
+Response `200 OK`:
+```json
+{
+  "success": true,
+  "employee_name": "John Doe",
+  "file_path": "./output/review_john_doe_20260107.md",
+  "message": "Performance review generated successfully in 45.23s",
+  "generated_at": "2026-01-07T14:30:00"
+}
+```
+
+### Generate Onboarding Plan
+
+```
+POST /api/v1/generate/onboarding
+Content-Type: application/json
+```
+
+Request:
+```json
+{
+  "employee_name": "Jane Smith",
+  "role": "Backend Engineer",
+  "department": "Engineering",
+  "start_date": "2026-01-15",
+  "manager_name": "John Doe",
+  "buddy_name": "Mike Johnson",
+  "equipment": ["MacBook Pro 16", "Monitor"],
+  "systems_access": ["GitHub", "Jira", "Slack"],
+  "training_required": ["Security Awareness"],
+  "team_members": ["Sarah K.", "Mike L."]
+}
+```
+
+Response `200 OK`:
+```json
+{
+  "success": true,
+  "employee_name": "Jane Smith",
+  "file_path": "./output/onboarding_jane_smith_20260107.md",
+  "message": "Onboarding plan generated successfully in 38.15s",
+  "generated_at": "2026-01-07T14:35:00"
+}
+```
+
+---
+
 ## Onboarding JSON Schema
 
 ```json
@@ -278,8 +337,10 @@ Response `200 OK`:
 performance-review-generator/
 ├── .env
 ├── .env.example
+├── .gitignore
 ├── requirements.txt
 ├── config.py
+├── logging_config.py
 ├── main.py
 ├── database/
 │   ├── __init__.py
@@ -297,6 +358,7 @@ performance-review-generator/
 │   ├── __init__.py
 │   ├── models.py
 │   ├── routes.py
+│   ├── generate_routes.py
 │   └── server.py
 └── output/
 ```
