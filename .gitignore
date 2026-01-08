@@ -27,7 +27,8 @@ wheels/
 *.egg
 
 # Generated output
-output/*.md
+output/
+postman/
 
 # IDE
 .idea/

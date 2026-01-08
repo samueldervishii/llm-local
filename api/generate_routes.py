@@ -2,16 +2,21 @@
 
 import os
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status
+from bson import ObjectId
+from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from config import config
 from logging_config import get_logger
 from database import MongoDatabase
 from llm import LocalLLM
-from generator.prompts import SYSTEM_PROMPT, format_employee_prompt
+from generator.prompts import format_employee_prompt
+from generator.templates import ReviewStyle, DATA_TEMPLATE
+from generator.pdf_export import markdown_to_pdf
 from generator.onboarding_prompts import (
     ONBOARDING_SYSTEM_PROMPT,
     format_onboarding_prompt,
@@ -31,8 +36,11 @@ class ReviewResponse(BaseModel):
     """Response model for generated review."""
 
     success: bool
+    review_id: str
     employee_name: str
     file_path: str
+    pdf_path: Optional[str] = None
+    template: str
     message: str
     generated_at: str
 
@@ -69,11 +77,35 @@ def init_services(llm_instance: LocalLLM, db_instance: MongoDatabase) -> None:
     logger.info("Generation services initialized")
 
 
-def _generate_review_content(employee: dict) -> str:
-    """Generate review content using LLM."""
-    prompt = format_employee_prompt(employee)
+def _get_template_from_db(template_name: str) -> dict:
+    """Fetch template from database, fall back to defaults if not found."""
+    template = db.get_template(template_name)
+    if template:
+        return template
+
+    # Fallback to hardcoded defaults
+    logger.warning(f"Template '{template_name}' not found in DB, using default")
+    from generator.templates import get_template, ReviewStyle
+    style = ReviewStyle(template_name)
+    default = get_template(style)
+    return {
+        "name": template_name,
+        "system_prompt": default.system_prompt,
+        "sections": default.sections,
+    }
+
+
+def _generate_review_content(employee: dict, template_name: str = "formal") -> str:
+    """Generate review content using LLM with template from database."""
+    template = _get_template_from_db(template_name)
+    system_prompt = template["system_prompt"]
+    sections = template["sections"]
+
+    # Build the full prompt with employee data and sections
+    prompt = format_employee_prompt(employee, ReviewStyle(template_name))
+
     return llm.chat(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_message=prompt,
         temperature=0.3,
         max_tokens=2048,
@@ -162,9 +194,19 @@ def _save_document(content: str, filename: str) -> str:
     summary="Generate performance review",
     description="Generate a performance review for a specific employee using the local LLM.",
 )
-def generate_review(employee_name: str):
+def generate_review(
+    employee_name: str,
+    template: ReviewStyle = Query(
+        default=ReviewStyle.FORMAL,
+        description="Review style: formal (corporate), casual (friendly), technical (engineering-focused)"
+    ),
+    export_pdf: bool = Query(
+        default=False,
+        description="Also generate a PDF version of the review"
+    ),
+):
     """Generate a performance review for an employee."""
-    logger.info(f"Review generation requested for: {employee_name}")
+    logger.info(f"Review generation requested for: {employee_name} (template: {template.value}, pdf: {export_pdf})")
 
     # Check if services are initialized
     if not llm or not db:
@@ -187,26 +229,58 @@ def generate_review(employee_name: str):
 
     try:
         # Generate review
-        logger.info(f"Generating review content for: {employee_name}")
+        logger.info(f"Generating review content for: {employee_name} using {template.value} template")
         start_time = datetime.now()
 
-        content = _generate_review_content(employee)
+        content = _generate_review_content(employee, template.value)
         document = _format_review_document(employee, content)
 
         # Save to file
         safe_name = employee_name.lower().replace(" ", "_")
         date_str = datetime.now().strftime("%Y%m%d")
-        filename = f"review_{safe_name}_{date_str}.md"
+        timestamp = datetime.now().strftime("%H%M%S")
+        filename = f"review_{safe_name}_{template.value}_{date_str}_{timestamp}.md"
         filepath = _save_document(document, filename)
+
+        # Generate PDF if requested
+        pdf_path = None
+        if export_pdf:
+            logger.info(f"Generating PDF for: {employee_name}")
+            pdf_filename = f"review_{safe_name}_{template.value}_{date_str}_{timestamp}.pdf"
+            pdf_filepath = os.path.join(config.OUTPUT_DIR, pdf_filename)
+            markdown_to_pdf(document, pdf_filepath, template.value)
+            pdf_path = pdf_filepath
+            logger.info(f"PDF generated: {pdf_path}")
+
+        # Save review to database
+        employee_id = employee.get("_id")
+        review_data = {
+            "employee_id": employee_id if isinstance(employee_id, ObjectId) else ObjectId(employee_id) if employee_id else None,
+            "employee_name": employee_name,
+            "template": template.value,
+            "file_path": filepath,
+            "pdf_path": pdf_path,
+            "review_period": employee.get("review_period", "Current Quarter"),
+            "generated_by": "api",
+        }
+        review_id = db.create_review(review_data)
+        logger.info(f"Review saved to database: {review_id}")
+
+        # Link review to employee
+        db.add_review_to_employee(employee_name, review_id)
+        logger.info(f"Review linked to employee: {employee_name}")
 
         elapsed = (datetime.now() - start_time).total_seconds()
         logger.info(f"Review generated successfully for {employee_name} in {elapsed:.2f}s")
 
         return ReviewResponse(
             success=True,
+            review_id=review_id,
             employee_name=employee_name,
             file_path=filepath,
-            message=f"Performance review generated successfully in {elapsed:.2f}s",
+            pdf_path=pdf_path,
+            template=template.value,
+            message=f"Performance review ({template.value}) generated successfully in {elapsed:.2f}s",
             generated_at=datetime.now().isoformat(),
         )
 
@@ -271,6 +345,128 @@ def generate_onboarding(request: OnboardingRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate onboarding plan: {str(e)}",
         )
+
+
+# =============================================================================
+# PDF EXPORT ENDPOINTS
+# =============================================================================
+
+
+class ConvertPdfRequest(BaseModel):
+    """Request model for converting markdown to PDF."""
+    filename: str = Field(..., description="Filename of the markdown file in output directory (e.g., review_john_doe_formal_20260108.md)")
+    template: ReviewStyle = Field(default=ReviewStyle.FORMAL, description="PDF style template")
+
+
+class ConvertPdfResponse(BaseModel):
+    """Response model for PDF conversion."""
+    success: bool
+    pdf_path: str
+    message: str
+
+
+@router.post(
+    "/convert-to-pdf",
+    response_model=ConvertPdfResponse,
+    summary="Convert markdown to PDF",
+    description="Convert an existing markdown review file to a styled PDF.",
+)
+def convert_to_pdf(request: ConvertPdfRequest):
+    """Convert an existing markdown file to PDF."""
+    # Build full path from filename
+    markdown_path = os.path.join(config.OUTPUT_DIR, request.filename)
+    logger.info(f"PDF conversion requested for: {markdown_path}")
+
+    if not os.path.exists(markdown_path):
+        # List available files to help user
+        available = [f for f in os.listdir(config.OUTPUT_DIR) if f.endswith('.md')] if os.path.exists(config.OUTPUT_DIR) else []
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {request.filename}. Available files: {available}",
+        )
+
+    try:
+        # Read markdown content
+        with open(markdown_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Generate PDF path
+        pdf_path = markdown_path.rsplit(".", 1)[0] + ".pdf"
+
+        # Convert to PDF
+        markdown_to_pdf(content, pdf_path, request.template.value)
+
+        logger.info(f"PDF created: {pdf_path}")
+        return ConvertPdfResponse(
+            success=True,
+            pdf_path=pdf_path,
+            message=f"PDF created successfully with {request.template.value} template",
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to convert to PDF: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to convert to PDF: {str(e)}",
+        )
+
+
+@router.get(
+    "/download/{filename}",
+    summary="Download generated file",
+    description="Download a generated review or onboarding file (markdown or PDF).",
+)
+def download_file(filename: str):
+    """Download a generated file from the output directory."""
+    filepath = os.path.join(config.OUTPUT_DIR, filename)
+
+    if not os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {filename}",
+        )
+
+    # Determine media type
+    if filename.endswith(".pdf"):
+        media_type = "application/pdf"
+    elif filename.endswith(".md"):
+        media_type = "text/markdown"
+    else:
+        media_type = "application/octet-stream"
+
+    return FileResponse(
+        path=filepath,
+        filename=filename,
+        media_type=media_type,
+    )
+
+
+@router.get(
+    "/templates",
+    summary="List available templates",
+    description="Get list of available review templates with descriptions.",
+)
+def list_templates():
+    """List all available review templates."""
+    return {
+        "templates": [
+            {
+                "name": "formal",
+                "description": "Traditional corporate HR style - professional, objective, third-person",
+                "best_for": "Official HR records, large corporations, formal review processes",
+            },
+            {
+                "name": "casual",
+                "description": "Modern friendly style - warm, encouraging, first-person",
+                "best_for": "Startups, small teams, regular check-ins",
+            },
+            {
+                "name": "technical",
+                "description": "Engineering-focused style - metrics-heavy, precise, technical",
+                "best_for": "Engineering teams, technical roles, performance benchmarking",
+            },
+        ]
+    }
 
 
 # =============================================================================

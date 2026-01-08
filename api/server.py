@@ -12,14 +12,16 @@ from fastapi import FastAPI
 from logging_config import setup_logging, get_logger
 from api.routes import router, db
 from api.generate_routes import router as generate_router, init_services
+from api.template_routes import router as template_router, init_db as init_template_db
+from api.review_routes import router as review_router, init_db as init_review_db
 from llm import LocalLLM
 
 # Initialize logging
 setup_logging()
 logger = get_logger(__name__)
 
-API_VERSION = "1.0.0"
-API_PREFIX = "/api/v1"
+API_VERSION = "2.0.0"
+API_PREFIX = "/api/v2"
 
 # LLM instance (loaded on startup)
 llm_instance: LocalLLM = None
@@ -45,6 +47,8 @@ async def lifespan(_app: FastAPI):
 
     # Initialize generation services
     init_services(llm_instance, db)
+    init_template_db(db)
+    init_review_db(db)
     logger.info("Generation services initialized")
 
     logger.info("API startup complete - ready to serve requests")
@@ -74,6 +78,8 @@ app = FastAPI(
 # Include routers
 app.include_router(router, prefix=API_PREFIX)
 app.include_router(generate_router, prefix=API_PREFIX)
+app.include_router(template_router, prefix=API_PREFIX)
+app.include_router(review_router, prefix=API_PREFIX)
 
 
 @app.get("/", tags=["health"])

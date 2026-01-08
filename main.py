@@ -9,7 +9,7 @@ from database import MongoDatabase
 from llm import LocalLLM
 from generator import ReviewGenerator, OnboardingGenerator
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 BANNER = f"""
  _   _ ____     ____

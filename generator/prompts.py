@@ -1,61 +1,15 @@
 """System prompts and templates for review generation."""
 
+from .templates import ReviewStyle, get_template, DATA_TEMPLATE
+
+# Default system prompt (formal style)
 SYSTEM_PROMPT = """You are an HR professional assistant drafting performance reviews.
 Generate professional, constructive, and balanced content.
 Be SPECIFIC - reference exact numbers, project names, and quotes from the data.
 Keep the tone professional yet encouraging. Focus on measurable achievements."""
 
-REVIEW_TEMPLATE = """Generate a performance review based on this employee data.
-
-=== EMPLOYEE PROFILE ===
-Name: {name}
-Role: {role} ({level})
-Department: {department}
-Tenure: {years_at_company} years
-Review Period: {review_period}
-
-=== PROJECT CONTRIBUTIONS ===
-{projects}
-
-=== SKILLS ===
-Technical: {technical_skills}
-Soft Skills: {soft_skills}
-
-=== QUANTITATIVE METRICS ===
-- Code Commits: {commits}
-- Pull Request Reviews: {pr_reviews}
-- Tasks Completed: {tasks_completed}
-- Bugs Fixed: {bugs_fixed}
-- Features Delivered: {features_delivered}
-- Incidents Resolved: {incidents_resolved}
-- Documentation Pages: {documentation_pages}
-
-=== PEER FEEDBACK ===
-{peer_feedback}
-
-=== MANAGER ASSESSMENT ===
-{manager_notes}
-
-=== PREVIOUS GOALS STATUS ===
-{previous_goals}
-
-=== PROFESSIONAL DEVELOPMENT ===
-Training Completed: {training_completed}
-Mentoring: {mentoring}
-
-=== COLLABORATION ===
-Teams Worked With: {teams_collaborated}
-Key Contributions: {key_contributions}
-
-=== KNOWN STRENGTHS ===
-{strengths}
-
-=== IDENTIFIED GROWTH AREAS ===
-{growth_areas}
-
----
-
-Generate these sections using the data above. Be specific and cite numbers/names:
+# Default review template (formal style)
+REVIEW_TEMPLATE = DATA_TEMPLATE + """Generate these sections using the data above. Be specific and cite numbers/names:
 
 1. PERFORMANCE SUMMARY (2-3 paragraphs - reference specific metrics and projects)
 
@@ -74,12 +28,30 @@ Generate these sections using the data above. Be specific and cite numbers/names
 Use markdown formatting with ## headers."""
 
 
-def format_employee_prompt(employee: dict) -> str:
+def get_styled_prompts(style: ReviewStyle = ReviewStyle.FORMAL) -> tuple[str, str]:
+    """
+    Get system prompt and sections for a specific review style.
+
+    Args:
+        style: Review style (formal, casual, technical).
+
+    Returns:
+        Tuple of (system_prompt, sections_template).
+    """
+    template = get_template(style)
+    return template.system_prompt, template.sections
+
+
+def format_employee_prompt(
+    employee: dict,
+    style: ReviewStyle = ReviewStyle.FORMAL
+) -> str:
     """
     Format employee data into the review prompt template.
 
     Args:
         employee: Employee document from MongoDB.
+        style: Review style (formal, casual, technical).
 
     Returns:
         Formatted prompt string.
@@ -140,7 +112,11 @@ def format_employee_prompt(employee: dict) -> str:
         f"- {g}" for g in employee.get("growth_areas", [])
     ) or "- None identified"
 
-    return REVIEW_TEMPLATE.format(
+    # Get the appropriate template sections
+    template = get_template(style)
+    full_template = DATA_TEMPLATE + template.sections
+
+    return full_template.format(
         name=employee.get("name", "Unknown"),
         role=employee.get("role", "Unknown"),
         level=employee.get("level", "N/A"),

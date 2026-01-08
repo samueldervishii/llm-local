@@ -1,32 +1,109 @@
 # HR Document Generator
 
-A local LLM-powered tool for generating performance reviews and onboarding plans.
+A local LLM-powered tool for generating performance reviews and onboarding plans using GPU acceleration.
+
+## Features
+
+- Generate performance reviews with 3 template styles (formal, casual, technical)
+- Generate onboarding plans for new hires
+- PDF export with professional styling
+- GPU-accelerated inference (NVIDIA CUDA)
+- Response caching for faster repeat requests
+- RESTful API with FastAPI
+- MongoDB for employee data storage
 
 ## Requirements
 
 - Python 3.10+
 - MongoDB
 - Llama 3.2 3B model (GGUF format)
+- NVIDIA GPU with CUDA 12+ (recommended) or CPU fallback
 
 ## Installation
 
 ```bash
 cd performance-review-generator
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+### GPU Setup (Recommended)
+
+For GPU acceleration, install llama-cpp-python with CUDA support:
+
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+```
+
+Requires CUDA 12.1+ toolkit installed on your system.
 
 ## Configuration
 
 Copy `.env.example` to `.env` and configure:
 
-```
+```bash
+# Database
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DATABASE=hr_database
 EMPLOYEES_COLLECTION=employees
+
+# Model settings
 MODEL_PATH=/path/to/llama-3.2-3b-instruct-q4_k_m.gguf
-MODEL_THREADS=6
-MODEL_CTX=4096
+MODEL_THREADS=2            # CPU threads (lower when using GPU)
+MODEL_CTX=3072             # Context size
+MODEL_BATCH=512            # Batch size for prompt processing
+MODEL_GPU_LAYERS=-1        # -1 = all layers on GPU, 0 = CPU only
+
+# Performance
+CACHE_ENABLED=true         # Cache responses for identical requests
+
+# Output
 OUTPUT_DIR=./output
+```
+
+### GPU vs CPU Configuration
+
+| Setting | GPU (Recommended) | CPU Only |
+|---------|-------------------|----------|
+| `MODEL_GPU_LAYERS` | `-1` (all layers) | `0` |
+| `MODEL_THREADS` | `2` | `4-6` |
+| Expected Speed | ~6s per review | ~12s per review |
+
+---
+
+## Postman Collection
+
+Import the Postman collection for easy API testing:
+
+```
+postman/HR_Document_Generator.postman_collection.json
+```
+
+The collection includes all endpoints with sample request bodies.
+
+---
+
+## Quick Start
+
+### 1. Start the API Server
+
+```bash
+python api/server.py
+```
+
+### 2. Create an Employee
+
+```bash
+curl -X POST "http://localhost:8000/api/v2/employees/" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "John Doe", "role": "Software Engineer", "department": "Engineering"}'
+```
+
+### 3. Generate a Review
+
+```bash
+curl -X POST "http://localhost:8000/api/v2/generate/review/John%20Doe?template=formal&export_pdf=true"
 ```
 
 ---
@@ -45,8 +122,6 @@ python main.py --list
 python main.py --employee "John Doe"
 ```
 
-Output: `output/review_john_doe_20260107.md`
-
 ### Generate All Performance Reviews
 
 ```bash
@@ -59,23 +134,13 @@ python main.py --all
 python main.py --onboarding onboarding_example.json
 ```
 
-Output: `output/onboarding_jane_smith_20260107.md`
-
 ---
 
 ## API Reference
 
-Base URL: `http://localhost:8000/api/v1`
+Base URL: `http://localhost:8000/api/v2`
 
-Start the API server:
-
-```bash
-python api/server.py
-# or
-uvicorn api.server:app --reload --port 8000
-```
-
-API documentation available at `http://localhost:8000/api/v1/docs`
+Interactive docs: `http://localhost:8000/api/v2/docs`
 
 ---
 
@@ -90,17 +155,20 @@ Response:
 {
   "status": "healthy",
   "service": "hr-document-generator",
-  "version": "1.0.0",
-  "api": "/api/v1"
+  "version": "2.0.0",
+  "api": "/api/v2",
+  "llm_loaded": true
 }
 ```
 
 ---
 
+## Employee Endpoints
+
 ### Create Employee
 
 ```
-POST /api/v1/employees/
+POST /api/v2/employees/
 Content-Type: application/json
 ```
 
@@ -166,7 +234,7 @@ Response `201 Created`:
 ### List All Employees
 
 ```
-GET /api/v1/employees/
+GET /api/v2/employees/
 ```
 
 Response `200 OK`:
@@ -186,38 +254,17 @@ Response `200 OK`:
 ### Get Employee
 
 ```
-GET /api/v1/employees/{name}
+GET /api/v2/employees/{name}
 ```
 
-Example: `GET /api/v1/employees/John%20Doe`
-
-Response `200 OK`:
-```json
-{
-  "id": "678d4f...",
-  "name": "John Doe",
-  "role": "Senior Software Engineer",
-  "department": "Engineering",
-  "level": "senior",
-  "years_at_company": 3.5,
-  "projects": [...],
-  "metrics": {...}
-}
-```
-
-Response `404 Not Found`:
-```json
-{
-  "detail": "Employee 'John Doe' not found"
-}
-```
+Example: `GET /api/v2/employees/John%20Doe`
 
 ---
 
 ### Update Employee
 
 ```
-PUT /api/v1/employees/{name}
+PUT /api/v2/employees/{name}
 Content-Type: application/json
 ```
 
@@ -229,57 +276,85 @@ Request (partial update):
 }
 ```
 
-Response `200 OK`:
-```json
-{
-  "message": "Employee 'John Doe' updated successfully"
-}
-```
-
 ---
 
 ### Delete Employee
 
 ```
-DELETE /api/v1/employees/{name}
-```
-
-Response `200 OK`:
-```json
-{
-  "message": "Employee 'John Doe' deleted successfully"
-}
+DELETE /api/v2/employees/{name}
 ```
 
 ---
 
 ## Generation Endpoints
 
-The API includes LLM-powered generation endpoints. The model is loaded on server startup.
+### List Available Templates
+
+```
+GET /api/v2/generate/templates
+```
+
+Response:
+```json
+{
+  "templates": [
+    {
+      "name": "formal",
+      "description": "Traditional corporate HR style - professional, objective, third-person",
+      "best_for": "Official HR records, large corporations, formal review processes"
+    },
+    {
+      "name": "casual",
+      "description": "Modern friendly style - warm, encouraging, first-person",
+      "best_for": "Startups, small teams, regular check-ins"
+    },
+    {
+      "name": "technical",
+      "description": "Engineering-focused style - metrics-heavy, precise, technical",
+      "best_for": "Engineering teams, technical roles, performance benchmarking"
+    }
+  ]
+}
+```
+
+---
 
 ### Generate Performance Review
 
 ```
-POST /api/v1/generate/review/{employee_name}
+POST /api/v2/generate/review/{employee_name}?template={style}&export_pdf={bool}
 ```
 
-Example: `POST /api/v1/generate/review/John%20Doe`
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `employee_name` | path | required | Employee name |
+| `template` | query | `formal` | Style: `formal`, `casual`, `technical` |
+| `export_pdf` | query | `false` | Also generate PDF version |
+
+Example:
+```bash
+curl -X POST "http://localhost:8000/api/v2/generate/review/John%20Doe?template=casual&export_pdf=true"
+```
 
 Response `200 OK`:
 ```json
 {
   "success": true,
   "employee_name": "John Doe",
-  "file_path": "./output/review_john_doe_20260107.md",
-  "message": "Performance review generated successfully in 45.23s",
-  "generated_at": "2026-01-07T14:30:00"
+  "file_path": "./output/review_john_doe_casual_20260108.md",
+  "pdf_path": "./output/review_john_doe_casual_20260108.pdf",
+  "template": "casual",
+  "message": "Performance review (casual) generated successfully in 6.12s",
+  "generated_at": "2026-01-08T10:30:00"
 }
 ```
+
+---
 
 ### Generate Onboarding Plan
 
 ```
-POST /api/v1/generate/onboarding
+POST /api/v2/generate/onboarding
 Content-Type: application/json
 ```
 
@@ -289,13 +364,13 @@ Request:
   "employee_name": "Jane Smith",
   "role": "Backend Engineer",
   "department": "Engineering",
-  "start_date": "2026-01-15",
+  "start_date": "2026-02-01",
   "manager_name": "John Doe",
   "buddy_name": "Mike Johnson",
-  "equipment": ["MacBook Pro 16", "Monitor"],
-  "systems_access": ["GitHub", "Jira", "Slack"],
-  "training_required": ["Security Awareness"],
-  "team_members": ["Sarah K.", "Mike L."]
+  "team_size": 8,
+  "remote": false,
+  "equipment_needed": ["MacBook Pro 16", "Monitor"],
+  "access_needed": ["GitHub", "Jira", "Slack", "AWS"]
 }
 ```
 
@@ -304,30 +379,62 @@ Response `200 OK`:
 {
   "success": true,
   "employee_name": "Jane Smith",
-  "file_path": "./output/onboarding_jane_smith_20260107.md",
-  "message": "Onboarding plan generated successfully in 38.15s",
-  "generated_at": "2026-01-07T14:35:00"
+  "file_path": "./output/onboarding_jane_smith_20260108.md",
+  "message": "Onboarding plan generated successfully in 5.89s",
+  "generated_at": "2026-01-08T10:35:00"
 }
 ```
 
 ---
 
-## Onboarding JSON Schema
+### Convert Markdown to PDF
 
+```
+POST /api/v2/generate/convert-to-pdf
+Content-Type: application/json
+```
+
+Request:
 ```json
 {
-  "employee_name": "Jane Smith",
-  "role": "Backend Engineer",
-  "department": "Engineering",
-  "start_date": "2026-01-15",
-  "manager_name": "John Doe",
-  "buddy_name": "Mike Johnson",
-  "equipment": ["MacBook Pro 16", "Monitor", "Keyboard"],
-  "systems_access": ["GitHub", "Jira", "Slack", "AWS Console"],
-  "training_required": ["Security Awareness", "Code Standards"],
-  "team_members": ["Sarah K.", "Mike L.", "Carlos R."]
+  "markdown_path": "./output/review_john_doe_formal_20260108.md",
+  "template": "formal"
 }
 ```
+
+Response `200 OK`:
+```json
+{
+  "success": true,
+  "pdf_path": "./output/review_john_doe_formal_20260108.pdf",
+  "message": "PDF created successfully with formal template"
+}
+```
+
+---
+
+### Download Generated File
+
+```
+GET /api/v2/generate/download/{filename}
+```
+
+Example:
+```bash
+curl -O "http://localhost:8000/api/v2/generate/download/review_john_doe_formal_20260108.pdf"
+```
+
+Returns the file for download (markdown or PDF).
+
+---
+
+## Review Templates
+
+| Template | Tone | Use Case |
+|----------|------|----------|
+| **formal** | Corporate, third-person, objective | Official HR records, large companies |
+| **casual** | Friendly, first-person, encouraging | Startups, regular check-ins |
+| **technical** | Metrics-focused, precise, detailed | Engineering teams, technical roles |
 
 ---
 
@@ -339,6 +446,7 @@ performance-review-generator/
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt
+├── README.md
 ├── config.py
 ├── logging_config.py
 ├── main.py
@@ -351,6 +459,8 @@ performance-review-generator/
 ├── generator/
 │   ├── __init__.py
 │   ├── prompts.py
+│   ├── templates.py          # Review templates (formal, casual, technical)
+│   ├── pdf_export.py         # PDF generation utility
 │   ├── review.py
 │   ├── onboarding_prompts.py
 │   └── onboarding.py
@@ -360,7 +470,11 @@ performance-review-generator/
 │   ├── routes.py
 │   ├── generate_routes.py
 │   └── server.py
+├── postman/
+│   └── HR_Document_Generator.postman_collection.json
 └── output/
+    ├── review_*.md
+    └── review_*.pdf
 ```
 
 ---
@@ -369,7 +483,22 @@ performance-review-generator/
 
 | Type | Filename Pattern |
 |------|------------------|
-| Performance Review | `review_{name}_{date}.md` |
+| Performance Review (MD) | `review_{name}_{template}_{date}.md` |
+| Performance Review (PDF) | `review_{name}_{template}_{date}.pdf` |
 | Onboarding Plan | `onboarding_{name}_{date}.md` |
 
 All generated documents are saved to the `output/` directory.
+
+---
+
+## Performance
+
+With GPU acceleration (NVIDIA Quadro M4000 / similar):
+
+| Operation | Time |
+|-----------|------|
+| Model loading | ~3-5s |
+| Review generation | ~6s |
+| PDF export | ~1s |
+
+Cached responses return instantly.
