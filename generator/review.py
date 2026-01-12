@@ -5,9 +5,12 @@ from datetime import datetime
 from pathlib import Path
 
 from config import config
+from logging_config import get_logger
 from llm import LocalLLM
 from database import MongoDatabase
 from .prompts import SYSTEM_PROMPT, format_employee_prompt
+
+logger = get_logger(__name__)
 
 
 class ReviewGenerator:
@@ -91,7 +94,7 @@ before being shared with the employee or used for any official purposes.
         if not employee:
             raise ValueError(f"Employee not found: {employee_name}")
 
-        print(f"Generating review for {employee['name']}...")
+        logger.info(f"Generating review for employee")
 
         prompt = format_employee_prompt(employee)
         content = self.llm.chat(
@@ -108,7 +111,7 @@ before being shared with the employee or used for any official purposes.
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(document)
 
-        print(f"Review saved to: {filepath}")
+        logger.info(f"Review saved to: {filepath}")
         return filepath
 
     def generate_all(self) -> list[str]:
@@ -121,23 +124,23 @@ before being shared with the employee or used for any official purposes.
         employees = self.db.get_all_employees()
 
         if not employees:
-            print("No employees found in database.")
+            logger.warning("No employees found in database.")
             return []
 
-        print(f"Generating reviews for {len(employees)} employees...")
+        logger.info(f"Generating reviews for {len(employees)} employees")
         generated_files = []
 
         for i, employee in enumerate(employees, 1):
             name = employee.get("name", "Unknown")
-            print(f"\n[{i}/{len(employees)}] Processing: {name}")
+            logger.info(f"Processing employee {i}/{len(employees)}")
 
             try:
                 filepath = self.generate_single(name)
                 generated_files.append(filepath)
             except Exception as e:
-                print(f"Error generating review for {name}: {e}")
+                logger.error(f"Error generating review: {e}")
 
-        print(f"\nCompleted! Generated {len(generated_files)} reviews.")
+        logger.info(f"Completed! Generated {len(generated_files)} reviews.")
         return generated_files
 
     def list_employees(self) -> list[str]:

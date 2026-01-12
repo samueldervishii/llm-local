@@ -27,6 +27,45 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/generate", tags=["generation"])
 
+
+def _validate_filename(filename: str) -> str:
+    """
+    Validate and sanitize filename to prevent path traversal attacks.
+
+    Args:
+        filename: User-provided filename.
+
+    Returns:
+        Safe filepath within OUTPUT_DIR.
+
+    Raises:
+        HTTPException: If filename is invalid or attempts path traversal.
+    """
+    # Get just the base filename, stripping any path components
+    safe_name = os.path.basename(filename)
+
+    # Reject empty or hidden files
+    if not safe_name or safe_name.startswith('.'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid filename",
+        )
+
+    # Build the full path
+    filepath = os.path.join(config.OUTPUT_DIR, safe_name)
+
+    # Resolve to absolute path and verify it's within OUTPUT_DIR
+    abs_filepath = os.path.abspath(filepath)
+    abs_output_dir = os.path.abspath(config.OUTPUT_DIR)
+
+    if not abs_filepath.startswith(abs_output_dir + os.sep):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid filename",
+        )
+
+    return abs_filepath
+
 # Shared instances (initialized on startup)
 llm: Optional[LocalLLM] = None
 db: Optional[MongoDatabase] = None
@@ -270,8 +309,17 @@ def generate_review(
         db.add_review_to_employee(employee_name, review_id)
         logger.info(f"Review linked to employee: {employee_name}")
 
+        # Audit log
+        db.log_action(
+            action="generate",
+            resource_type="review",
+            resource_id=review_id,
+            details={"template": template.value, "pdf_exported": export_pdf},
+            user="api",
+        )
+
         elapsed = (datetime.now() - start_time).total_seconds()
-        logger.info(f"Review generated successfully for {employee_name} in {elapsed:.2f}s")
+        logger.info(f"Review generated successfully in {elapsed:.2f}s")
 
         return ReviewResponse(
             success=True,
@@ -373,8 +421,8 @@ class ConvertPdfResponse(BaseModel):
 )
 def convert_to_pdf(request: ConvertPdfRequest):
     """Convert an existing markdown file to PDF."""
-    # Build full path from filename
-    markdown_path = os.path.join(config.OUTPUT_DIR, request.filename)
+    # Validate and sanitize filename to prevent path traversal
+    markdown_path = _validate_filename(request.filename)
     logger.info(f"PDF conversion requested for: {markdown_path}")
 
     if not os.path.exists(markdown_path):
@@ -382,7 +430,7 @@ def convert_to_pdf(request: ConvertPdfRequest):
         available = [f for f in os.listdir(config.OUTPUT_DIR) if f.endswith('.md')] if os.path.exists(config.OUTPUT_DIR) else []
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found: {request.filename}. Available files: {available}",
+            detail=f"File not found: {os.path.basename(request.filename)}. Available files: {available}",
         )
 
     try:
@@ -418,12 +466,13 @@ def convert_to_pdf(request: ConvertPdfRequest):
 )
 def download_file(filename: str):
     """Download a generated file from the output directory."""
-    filepath = os.path.join(config.OUTPUT_DIR, filename)
+    # Validate and sanitize filename to prevent path traversal
+    filepath = _validate_filename(filename)
 
     if not os.path.exists(filepath):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found: {filename}",
+            detail=f"File not found: {os.path.basename(filename)}",
         )
 
     # Determine media type

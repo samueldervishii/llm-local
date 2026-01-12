@@ -86,6 +86,15 @@ def create_employee(employee: EmployeeCreate):
     inserted_id = db.insert_employee(employee_data)
     logger.info(f"Employee created successfully: {employee.name} (ID: {inserted_id})")
 
+    # Audit log
+    db.log_action(
+        action="create",
+        resource_type="employee",
+        resource_id=inserted_id,
+        details={"name": employee.name, "department": employee.department},
+        user="api",
+    )
+
     return MessageResponse(
         message=f"Employee '{employee.name}' created successfully",
         id=inserted_id,
@@ -157,6 +166,14 @@ def update_employee(name: str, employee: EmployeeUpdate):
     db.update_employee(name, update_data)
     logger.info(f"Employee updated successfully: {name}")
 
+    # Audit log
+    db.log_action(
+        action="update",
+        resource_type="employee",
+        details={"name": name, "fields_updated": list(update_data.keys())},
+        user="api",
+    )
+
     return MessageResponse(message=f"Employee '{name}' updated successfully")
 
 
@@ -178,4 +195,13 @@ def delete_employee(name: str):
         )
 
     logger.info(f"Employee deleted successfully: {name}")
+
+    # Audit log
+    db.log_action(
+        action="delete",
+        resource_type="employee",
+        details={"name": name},
+        user="api",
+    )
+
     return MessageResponse(message=f"Employee '{name}' deleted successfully")

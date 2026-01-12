@@ -41,7 +41,7 @@ class LocalLLM:
     def _get_cache_key(self, system: str, user: str) -> str:
         """Generate cache key from prompts."""
         content = f"{system}:{user}"
-        return hashlib.md5(content.encode()).hexdigest()
+        return hashlib.sha256(content.encode()).hexdigest()
 
     def generate(
         self,

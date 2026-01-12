@@ -14,13 +14,15 @@ from api.routes import router, db
 from api.generate_routes import router as generate_router, init_services
 from api.template_routes import router as template_router, init_db as init_template_db
 from api.review_routes import router as review_router, init_db as init_review_db
+from api.bulk_routes import router as bulk_router, init_db as init_bulk_db
+from api.stats_routes import router as stats_router, init_db as init_stats_db
 from llm import LocalLLM
 
 # Initialize logging
 setup_logging()
 logger = get_logger(__name__)
 
-API_VERSION = "2.0.0"
+API_VERSION = "2.1.0"
 API_PREFIX = "/api/v2"
 
 # LLM instance (loaded on startup)
@@ -49,7 +51,9 @@ async def lifespan(_app: FastAPI):
     init_services(llm_instance, db)
     init_template_db(db)
     init_review_db(db)
-    logger.info("Generation services initialized")
+    init_bulk_db(db)
+    init_stats_db(db)
+    logger.info("All services initialized")
 
     logger.info("API startup complete - ready to serve requests")
 
@@ -80,6 +84,8 @@ app.include_router(router, prefix=API_PREFIX)
 app.include_router(generate_router, prefix=API_PREFIX)
 app.include_router(template_router, prefix=API_PREFIX)
 app.include_router(review_router, prefix=API_PREFIX)
+app.include_router(bulk_router, prefix=API_PREFIX)
+app.include_router(stats_router, prefix=API_PREFIX)
 
 
 @app.get("/", tags=["health"])
@@ -120,7 +126,7 @@ if __name__ == "__main__":
     print(BANNER)
 
     if args.reload:
-        print("WARNING: Running in development mode with auto-reload\n")
+        logger.warning("Running in development mode with auto-reload")
 
     uvicorn.run(
         "api.server:app",

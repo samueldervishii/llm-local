@@ -1,5 +1,10 @@
 from huggingface_hub import hf_hub_download
 
+from logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
+
 save_dir = "/home/usr/path-where-you-want-the-model-to-be-saved"
 
 model_path = hf_hub_download(
@@ -8,4 +13,4 @@ model_path = hf_hub_download(
     local_dir=save_dir
 )
 
-print(f"Model saved to: {model_path}")
+logger.info(f"Model saved to: {model_path}")

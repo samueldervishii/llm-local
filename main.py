@@ -5,11 +5,15 @@ import argparse
 import json
 import sys
 
+from logging_config import setup_logging, get_logger
 from database import MongoDatabase
 from llm import LocalLLM
 from generator import ReviewGenerator, OnboardingGenerator
 
-VERSION = "2.0.0"
+setup_logging()
+logger = get_logger(__name__)
+
+VERSION = "2.1.0"
 
 BANNER = f"""
  _   _ ____     ____
@@ -85,34 +89,30 @@ Examples:
             with open(args.onboarding, "r") as f:
                 onboarding_data = json.load(f)
 
-            print("[*] Loading LLM model...")
+            logger.info("Loading LLM model...")
             with LocalLLM() as llm:
-                print("[+] Model loaded successfully.\n")
+                logger.info("Model loaded successfully.")
                 generator = OnboardingGenerator(llm)
                 generator.generate(onboarding_data)
-            print("\n[+] Done!")
+            logger.info("Done!")
             return 0
 
         # Database operations
         with MongoDatabase() as db:
             if args.list:
                 show_banner()
-                print("[*] Employees in database:")
-                print("-" * 40)
+                logger.info("Employees in database:")
                 names = db.list_employee_names()
                 if names:
-                    for name in names:
-                        print(f"    {name}")
-                    print("-" * 40)
-                    print(f"    Total: {len(names)} employees")
+                    logger.info(f"Found {len(names)} employees")
                 else:
-                    print("    No employees found.")
+                    logger.info("No employees found.")
                 return 0
 
             show_banner()
-            print("[*] Loading LLM model...")
+            logger.info("Loading LLM model...")
             with LocalLLM() as llm:
-                print("[+] Model loaded successfully.\n")
+                logger.info("Model loaded successfully.")
                 generator = ReviewGenerator(llm, db)
 
                 if args.employee:
@@ -120,21 +120,21 @@ Examples:
                 elif args.all:
                     generator.generate_all()
 
-            print("\n[+] Done!")
+            logger.info("Done!")
 
         return 0
 
     except FileNotFoundError as e:
-        print(f"File not found: {e}", file=sys.stderr)
+        logger.error(f"File not found: {e}")
         return 1
     except json.JSONDecodeError as e:
-        print(f"Invalid JSON: {e}", file=sys.stderr)
+        logger.error(f"Invalid JSON: {e}")
         return 1
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"Error: {e}")
         return 1
     except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
+        logger.error(f"Unexpected error: {e}")
         return 1
 
 

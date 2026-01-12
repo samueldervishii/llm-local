@@ -19,6 +19,7 @@ class MongoDatabase:
         self._collection: Optional[Collection] = None
         self._templates: Optional[Collection] = None
         self._reviews: Optional[Collection] = None
+        self._audit_logs: Optional[Collection] = None
 
     def connect(self) -> None:
         """Establish connection to MongoDB."""
@@ -27,6 +28,7 @@ class MongoDatabase:
         self._collection = self._db[config.EMPLOYEES_COLLECTION]
         self._templates = self._db["review_templates"]
         self._reviews = self._db["reviews"]
+        self._audit_logs = self._db["audit_logs"]
         self._init_default_templates()
 
     def close(self) -> None:
@@ -393,6 +395,183 @@ Use markdown formatting with ## headers. Include specific numbers and technical 
             return result.deleted_count > 0
         except Exception:
             return False
+
+    # =========================================================================
+    # BULK OPERATIONS
+    # =========================================================================
+
+    def bulk_insert_employees(self, employees: list[dict]) -> dict:
+        """
+        Insert multiple employees at once.
+
+        Args:
+            employees: List of employee documents.
+
+        Returns:
+            Dict with 'inserted' count and 'errors' list.
+        """
+        results = {"inserted": 0, "skipped": 0, "errors": []}
+
+        for emp in employees:
+            name = emp.get("name", "")
+            if not name:
+                results["errors"].append({"data": emp, "error": "Missing name field"})
+                continue
+
+            if self.employee_exists(name):
+                results["skipped"] += 1
+                results["errors"].append({"name": name, "error": "Employee already exists"})
+                continue
+
+            try:
+                self.insert_employee(emp)
+                results["inserted"] += 1
+            except Exception as e:
+                results["errors"].append({"name": name, "error": str(e)})
+
+        return results
+
+    # =========================================================================
+    # AUDIT LOGS COLLECTION
+    # =========================================================================
+
+    @property
+    def audit_logs(self) -> Collection:
+        """Get the audit logs collection."""
+        if self._audit_logs is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._audit_logs
+
+    def log_action(
+        self,
+        action: str,
+        resource_type: str,
+        resource_id: Optional[str] = None,
+        details: Optional[dict] = None,
+        user: str = "system",
+    ) -> str:
+        """
+        Log an action to the audit log.
+
+        Args:
+            action: Action type (create, read, update, delete, generate)
+            resource_type: Type of resource (employee, review, template)
+            resource_id: ID of the affected resource
+            details: Additional details about the action
+            user: Who performed the action
+
+        Returns:
+            Inserted log ID as string.
+        """
+        log_entry = {
+            "action": action,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "details": details or {},
+            "user": user,
+            "timestamp": datetime.utcnow(),
+        }
+        result = self._audit_logs.insert_one(log_entry)
+        return str(result.inserted_id)
+
+    def get_audit_logs(
+        self,
+        limit: int = 100,
+        resource_type: Optional[str] = None,
+        action: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        Get audit logs with optional filtering.
+
+        Args:
+            limit: Maximum number of logs to return.
+            resource_type: Filter by resource type.
+            action: Filter by action type.
+
+        Returns:
+            List of audit log entries.
+        """
+        query = {}
+        if resource_type:
+            query["resource_type"] = resource_type
+        if action:
+            query["action"] = action
+
+        logs = list(
+            self._audit_logs.find(query)
+            .sort("timestamp", DESCENDING)
+            .limit(limit)
+        )
+        for log in logs:
+            log["_id"] = str(log["_id"])
+        return logs
+
+    # =========================================================================
+    # STATISTICS
+    # =========================================================================
+
+    def get_statistics(self) -> dict:
+        """
+        Get various statistics about the database.
+
+        Returns:
+            Dict containing counts and aggregated stats.
+        """
+        stats = {
+            "employees": {
+                "total": self._collection.count_documents({}),
+                "by_department": {},
+                "by_level": {},
+            },
+            "reviews": {
+                "total": self._reviews.count_documents({}),
+                "by_status": {},
+                "by_template": {},
+            },
+            "templates": {
+                "total": self._templates.count_documents({}),
+                "active": self._templates.count_documents({"active": True}),
+            },
+            "audit_logs": {
+                "total": self._audit_logs.count_documents({}),
+            },
+        }
+
+        # Employees by department
+        pipeline = [
+            {"$group": {"_id": "$department", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+        ]
+        for doc in self._collection.aggregate(pipeline):
+            dept = doc["_id"] or "Unknown"
+            stats["employees"]["by_department"][dept] = doc["count"]
+
+        # Employees by level
+        pipeline = [
+            {"$group": {"_id": "$level", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+        ]
+        for doc in self._collection.aggregate(pipeline):
+            level = doc["_id"] or "Unknown"
+            stats["employees"]["by_level"][level] = doc["count"]
+
+        # Reviews by status
+        pipeline = [
+            {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+        ]
+        for doc in self._reviews.aggregate(pipeline):
+            status = doc["_id"] or "draft"
+            stats["reviews"]["by_status"][status] = doc["count"]
+
+        # Reviews by template
+        pipeline = [
+            {"$group": {"_id": "$template", "count": {"$sum": 1}}},
+        ]
+        for doc in self._reviews.aggregate(pipeline):
+            template = doc["_id"] or "Unknown"
+            stats["reviews"]["by_template"][template] = doc["count"]
+
+        return stats
 
     def __enter__(self):
         """Context manager entry."""

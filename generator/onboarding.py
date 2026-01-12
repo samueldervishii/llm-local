@@ -5,8 +5,11 @@ from datetime import datetime
 from pathlib import Path
 
 from config import config
+from logging_config import get_logger
 from llm import LocalLLM
 from .onboarding_prompts import ONBOARDING_SYSTEM_PROMPT, format_onboarding_prompt
+
+logger = get_logger(__name__)
 
 
 class OnboardingGenerator:
@@ -60,7 +63,7 @@ class OnboardingGenerator:
             Path to generated file.
         """
         employee_name = onboarding_data.get("employee_name", "Unknown")
-        print(f"Generating onboarding plan for {employee_name}...")
+        logger.info("Generating onboarding plan")
 
         prompt = format_onboarding_prompt(onboarding_data)
         content = self.llm.chat(
@@ -78,5 +81,5 @@ class OnboardingGenerator:
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(document)
 
-        print(f"Onboarding plan saved to: {filepath}")
+        logger.info(f"Onboarding plan saved to: {filepath}")
         return filepath
