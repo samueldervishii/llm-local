@@ -14,6 +14,7 @@ from config import config
 from logging_config import get_logger
 from database import MongoDatabase
 from llm import LocalLLM
+from encryption import encrypt_document, decrypt_document
 from generator.prompts import format_employee_prompt
 from generator.templates import ReviewStyle, DATA_TEMPLATE
 from generator.pdf_export import markdown_to_pdf
@@ -215,12 +216,12 @@ def _format_onboarding_document(data: dict, content: str) -> str:
 
 
 def _save_document(content: str, filename: str) -> str:
-    """Save document to output directory."""
+    """Save encrypted document to output directory."""
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
     filepath = os.path.join(config.OUTPUT_DIR, filename)
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(content)
-    return filepath
+    # Encrypt sensitive employee data before saving
+    encrypted_path = encrypt_document(content, filepath)
+    return encrypted_path
 
 
 @router.post(
@@ -245,7 +246,7 @@ def generate_review(
     ),
 ):
     """Generate a performance review for an employee."""
-    logger.info(f"Review generation requested for: {employee_name} (template: {template.value}, pdf: {export_pdf})")
+    logger.info(f"Review generation requested (template: {template.value}, pdf: {export_pdf})")
 
     # Check if services are initialized
     if not llm or not db:
@@ -256,11 +257,11 @@ def generate_review(
         )
 
     # Fetch employee
-    logger.debug(f"Fetching employee data: {employee_name}")
+    logger.debug("Fetching employee data")
     employee = db.get_employee(employee_name)
 
     if not employee:
-        logger.warning(f"Employee not found: {employee_name}")
+        logger.warning("Employee not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Employee '{employee_name}' not found",
@@ -268,7 +269,7 @@ def generate_review(
 
     try:
         # Generate review
-        logger.info(f"Generating review content for: {employee_name} using {template.value} template")
+        logger.info(f"Generating review content using {template.value} template")
         start_time = datetime.now()
 
         content = _generate_review_content(employee, template.value)
@@ -284,12 +285,12 @@ def generate_review(
         # Generate PDF if requested
         pdf_path = None
         if export_pdf:
-            logger.info(f"Generating PDF for: {employee_name}")
+            logger.info("Generating PDF export")
             pdf_filename = f"review_{safe_name}_{template.value}_{date_str}_{timestamp}.pdf"
             pdf_filepath = os.path.join(config.OUTPUT_DIR, pdf_filename)
             markdown_to_pdf(document, pdf_filepath, template.value)
             pdf_path = pdf_filepath
-            logger.info(f"PDF generated: {pdf_path}")
+            logger.info("PDF generated successfully")
 
         # Save review to database
         employee_id = employee.get("_id")
@@ -307,7 +308,7 @@ def generate_review(
 
         # Link review to employee
         db.add_review_to_employee(employee_name, review_id)
-        logger.info(f"Review linked to employee: {employee_name}")
+        logger.info(f"Review linked to employee (review_id: {review_id})")
 
         # Audit log
         db.log_action(
@@ -333,7 +334,7 @@ def generate_review(
         )
 
     except Exception as e:
-        logger.error(f"Failed to generate review for {employee_name}: {str(e)}")
+        logger.error(f"Failed to generate review: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate review: {str(e)}",
@@ -351,7 +352,7 @@ def generate_review(
 )
 def generate_onboarding(request: OnboardingRequest):
     """Generate an onboarding plan for a new hire."""
-    logger.info(f"Onboarding generation requested for: {request.employee_name}")
+    logger.info("Onboarding generation requested")
 
     # Check if services are initialized
     if not llm:
@@ -363,7 +364,7 @@ def generate_onboarding(request: OnboardingRequest):
 
     try:
         # Generate onboarding plan
-        logger.info(f"Generating onboarding content for: {request.employee_name}")
+        logger.info("Generating onboarding content")
         start_time = datetime.now()
 
         data = request.model_dump()
@@ -377,7 +378,7 @@ def generate_onboarding(request: OnboardingRequest):
         filepath = _save_document(document, filename)
 
         elapsed = (datetime.now() - start_time).total_seconds()
-        logger.info(f"Onboarding plan generated for {request.employee_name} in {elapsed:.2f}s")
+        logger.info(f"Onboarding plan generated in {elapsed:.2f}s")
 
         return OnboardingResponse(
             success=True,
@@ -388,7 +389,7 @@ def generate_onboarding(request: OnboardingRequest):
         )
 
     except Exception as e:
-        logger.error(f"Failed to generate onboarding for {request.employee_name}: {str(e)}")
+        logger.error(f"Failed to generate onboarding: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate onboarding plan: {str(e)}",
@@ -423,28 +424,42 @@ def convert_to_pdf(request: ConvertPdfRequest):
     """Convert an existing markdown file to PDF."""
     # Validate and sanitize filename to prevent path traversal
     markdown_path = _validate_filename(request.filename)
-    logger.info(f"PDF conversion requested for: {markdown_path}")
+    logger.info("PDF conversion requested")
 
-    if not os.path.exists(markdown_path):
+    # Check for encrypted version
+    encrypted_path = markdown_path + '.enc' if not markdown_path.endswith('.enc') else markdown_path
+
+    if os.path.exists(encrypted_path):
+        # Decrypt and read content
+        try:
+            content = decrypt_document(encrypted_path)
+        except Exception as e:
+            logger.error(f"Failed to decrypt file: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to decrypt file: {str(e)}",
+            )
+    elif os.path.exists(markdown_path):
+        # Legacy unencrypted file
+        with open(markdown_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    else:
         # List available files to help user
-        available = [f for f in os.listdir(config.OUTPUT_DIR) if f.endswith('.md')] if os.path.exists(config.OUTPUT_DIR) else []
+        available = [f for f in os.listdir(config.OUTPUT_DIR) if f.endswith(('.md', '.md.enc'))] if os.path.exists(config.OUTPUT_DIR) else []
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"File not found: {os.path.basename(request.filename)}. Available files: {available}",
         )
 
     try:
-        # Read markdown content
-        with open(markdown_path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # Generate PDF path
-        pdf_path = markdown_path.rsplit(".", 1)[0] + ".pdf"
+        # Generate PDF path (strip .enc if present)
+        base_path = markdown_path.rstrip('.enc') if markdown_path.endswith('.enc') else markdown_path
+        pdf_path = base_path.rsplit(".", 1)[0] + ".pdf"
 
         # Convert to PDF
         markdown_to_pdf(content, pdf_path, request.template.value)
 
-        logger.info(f"PDF created: {pdf_path}")
+        logger.info("PDF created successfully")
         return ConvertPdfResponse(
             success=True,
             pdf_path=pdf_path,
@@ -462,32 +477,63 @@ def convert_to_pdf(request: ConvertPdfRequest):
 @router.get(
     "/download/{filename}",
     summary="Download generated file",
-    description="Download a generated review or onboarding file (markdown or PDF).",
+    description="Download a generated review or onboarding file (markdown or PDF). Encrypted files are automatically decrypted.",
 )
 def download_file(filename: str):
     """Download a generated file from the output directory."""
     # Validate and sanitize filename to prevent path traversal
     filepath = _validate_filename(filename)
 
-    if not os.path.exists(filepath):
+    # Check for encrypted version if original doesn't exist
+    encrypted_path = filepath + '.enc' if not filepath.endswith('.enc') else filepath
+
+    if os.path.exists(encrypted_path):
+        # Decrypt and return content
+        try:
+            decrypted_content = decrypt_document(encrypted_path)
+
+            # Determine the original filename (remove .enc extension for response)
+            original_filename = filename.rstrip('.enc')
+
+            # Determine media type based on original extension
+            if original_filename.endswith(".pdf"):
+                media_type = "application/pdf"
+            elif original_filename.endswith(".md"):
+                media_type = "text/markdown"
+            else:
+                media_type = "text/plain"
+
+            from fastapi.responses import Response
+            return Response(
+                content=decrypted_content,
+                media_type=media_type,
+                headers={"Content-Disposition": f'attachment; filename="{original_filename}"'}
+            )
+        except Exception as e:
+            logger.error(f"Failed to decrypt file {filename}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to decrypt file: {str(e)}",
+            )
+    elif os.path.exists(filepath):
+        # File exists but is not encrypted (legacy or PDF)
+        if filename.endswith(".pdf"):
+            media_type = "application/pdf"
+        elif filename.endswith(".md"):
+            media_type = "text/markdown"
+        else:
+            media_type = "application/octet-stream"
+
+        return FileResponse(
+            path=filepath,
+            filename=filename,
+            media_type=media_type,
+        )
+    else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"File not found: {os.path.basename(filename)}",
         )
-
-    # Determine media type
-    if filename.endswith(".pdf"):
-        media_type = "application/pdf"
-    elif filename.endswith(".md"):
-        media_type = "text/markdown"
-    else:
-        media_type = "application/octet-stream"
-
-    return FileResponse(
-        path=filepath,
-        filename=filename,
-        media_type=media_type,
-    )
 
 
 @router.get(

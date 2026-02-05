@@ -149,17 +149,16 @@ async def bulk_import_csv(file: UploadFile = File(...)):
 
             employees.append(emp)
 
-        logger.info(f"CSV bulk import requested: {len(employees)} employees from {file.filename}")
+        logger.info(f"CSV bulk import requested: {len(employees)} employees")
 
         results = db.bulk_insert_employees(employees)
 
-        # Log the action
+        # Log the action (without sensitive filename)
         db.log_action(
             action="bulk_create",
             resource_type="employee",
             details={
                 "source": "csv",
-                "filename": file.filename,
                 "total": len(employees),
                 "inserted": results["inserted"],
                 "skipped": results["skipped"],

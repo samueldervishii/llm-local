@@ -7,6 +7,7 @@ from pathlib import Path
 from config import config
 from logging_config import get_logger
 from llm import LocalLLM
+from encryption import encrypt_document
 from .onboarding_prompts import ONBOARDING_SYSTEM_PROMPT, format_onboarding_prompt
 
 logger = get_logger(__name__)
@@ -78,8 +79,8 @@ class OnboardingGenerator:
         filename = self._generate_filename(employee_name)
         filepath = os.path.join(config.OUTPUT_DIR, filename)
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(document)
+        # Encrypt sensitive employee data before saving
+        encrypted_path = encrypt_document(document, filepath)
 
-        logger.info(f"Onboarding plan saved to: {filepath}")
-        return filepath
+        logger.info("Onboarding plan saved (encrypted)")
+        return encrypted_path

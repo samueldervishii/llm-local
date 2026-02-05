@@ -71,10 +71,10 @@ def _format_employee_response(employee: dict) -> EmployeeResponse:
 )
 def create_employee(employee: EmployeeCreate):
     """Create a new employee record."""
-    logger.info(f"Creating employee: {employee.name}")
+    logger.info("Creating new employee record")
 
     if db.employee_exists(employee.name):
-        logger.warning(f"Employee already exists: {employee.name}")
+        logger.warning("Employee already exists")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Employee '{employee.name}' already exists",
@@ -84,7 +84,7 @@ def create_employee(employee: EmployeeCreate):
     employee_data = employee.model_dump()
 
     inserted_id = db.insert_employee(employee_data)
-    logger.info(f"Employee created successfully: {employee.name} (ID: {inserted_id})")
+    logger.info(f"Employee created successfully (ID: {inserted_id})")
 
     # Audit log
     db.log_action(
@@ -123,15 +123,15 @@ def list_employees():
 )
 def get_employee(name: str):
     """Get a single employee by name."""
-    logger.debug(f"Fetching employee: {name}")
+    logger.debug("Fetching employee record")
     employee = db.get_employee(name)
     if not employee:
-        logger.warning(f"Employee not found: {name}")
+        logger.warning("Employee not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Employee '{name}' not found",
         )
-    logger.info(f"Retrieved employee: {name}")
+    logger.info("Retrieved employee record")
     return _format_employee_response(employee)
 
 
@@ -143,10 +143,10 @@ def get_employee(name: str):
 )
 def update_employee(name: str, employee: EmployeeUpdate):
     """Update an existing employee."""
-    logger.info(f"Updating employee: {name}")
+    logger.info("Updating employee record")
 
     if not db.employee_exists(name):
-        logger.warning(f"Employee not found for update: {name}")
+        logger.warning("Employee not found for update")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Employee '{name}' not found",
@@ -157,14 +157,14 @@ def update_employee(name: str, employee: EmployeeUpdate):
         update_data["metrics"] = employee.metrics.model_dump()
 
     if not update_data:
-        logger.warning(f"No fields to update for: {name}")
+        logger.warning("No fields to update")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
 
     db.update_employee(name, update_data)
-    logger.info(f"Employee updated successfully: {name}")
+    logger.info("Employee updated successfully")
 
     # Audit log
     db.log_action(
@@ -185,16 +185,16 @@ def update_employee(name: str, employee: EmployeeUpdate):
 )
 def delete_employee(name: str):
     """Delete an employee."""
-    logger.info(f"Deleting employee: {name}")
+    logger.info("Deleting employee record")
 
     if not db.delete_employee(name):
-        logger.warning(f"Employee not found for deletion: {name}")
+        logger.warning("Employee not found for deletion")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Employee '{name}' not found",
         )
 
-    logger.info(f"Employee deleted successfully: {name}")
+    logger.info("Employee deleted successfully")
 
     # Audit log
     db.log_action(
